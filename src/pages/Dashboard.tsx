@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Header } from '@/components/Header';
 import { GrantCard } from '@/components/GrantCard';
 import { NLPSearchInput } from '@/components/NLPSearchInput';
+import { GrantFiltersComponent, GrantFilters, DEFAULT_FILTERS } from '@/components/GrantFilters';
 import { NewsletterSignup } from '@/components/NewsletterSignup';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Bookmark, Search, Bell, AlertCircle } from 'lucide-react';
-import { searchGrants, getRecommendedGrants, GrantWithScore } from '@/services/grantMatcher';
+import { searchGrants, filterGrantsManually, getAllGrants, GrantWithScore } from '@/services/grantMatcher';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
@@ -16,11 +17,13 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [savedGrants, setSavedGrants] = useState<GrantWithScore[]>([]);
-  const [recommendedGrants, setRecommendedGrants] = useState<GrantWithScore[]>([]);
+  const [displayedGrants, setDisplayedGrants] = useState<GrantWithScore[]>([]);
   const [searchResults, setSearchResults] = useState<GrantWithScore[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(true);
+  const [isLoadingGrants, setIsLoadingGrants] = useState(true);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<GrantFilters>(DEFAULT_FILTERS);
+  const [hasSearched, setHasSearched] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -28,31 +31,88 @@ export default function Dashboard() {
     }
   }, [user, loading, navigate]);
 
-  // Load recommended grants on mount
+  // Load grants on mount
   useEffect(() => {
-    async function loadRecommendations() {
+    async function loadGrants() {
       if (!user) return;
 
       try {
-        setIsLoadingRecommendations(true);
-        const recommendations = await getRecommendedGrants(user.id);
-        setRecommendedGrants(recommendations);
+        setIsLoadingGrants(true);
+        const grants = await getAllGrants();
+        setDisplayedGrants(grants);
       } catch (error) {
-        console.error('Failed to load recommendations:', error);
+        console.error('Failed to load grants:', error);
         toast({
-          title: "Couldn't load recommendations",
+          title: "Couldn't load grants",
           description: "We'll try again when you refresh the page.",
           variant: "destructive",
         });
       } finally {
-        setIsLoadingRecommendations(false);
+        setIsLoadingGrants(false);
       }
     }
 
     if (user) {
-      loadRecommendations();
+      loadGrants();
     }
   }, [user, toast]);
+
+  // Apply filters when they change
+  const applyFilters = useCallback(async (newFilters: GrantFilters) => {
+    const hasActiveFilters =
+      newFilters.issueArea !== null ||
+      newFilters.scope !== null ||
+      newFilters.fundingMin > 0 ||
+      newFilters.fundingMax < 500000;
+
+    if (!hasActiveFilters) {
+      // No filters, load all grants
+      try {
+        setIsLoadingGrants(true);
+        const grants = await getAllGrants();
+        setDisplayedGrants(grants);
+      } catch (error) {
+        console.error('Failed to load grants:', error);
+      } finally {
+        setIsLoadingGrants(false);
+      }
+      return;
+    }
+
+    try {
+      setIsLoadingGrants(true);
+      const filteredGrants = await filterGrantsManually(newFilters);
+      setDisplayedGrants(filteredGrants);
+
+      toast({
+        title: `Found ${filteredGrants.length} grants`,
+        description: hasActiveFilters ? "Filtered by your criteria" : "Showing all grants",
+      });
+    } catch (error) {
+      console.error('Failed to filter grants:', error);
+      toast({
+        title: "Filter failed",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingGrants(false);
+    }
+  }, [toast]);
+
+  const handleFiltersChange = (newFilters: GrantFilters) => {
+    setFilters(newFilters);
+    setHasSearched(false); // Clear NLP search results when using manual filters
+    setSearchResults([]);
+    applyFilters(newFilters);
+  };
+
+  const handleResetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setHasSearched(false);
+    setSearchResults([]);
+    applyFilters(DEFAULT_FILTERS);
+  };
 
   const handleSearch = async (query: string) => {
     setIsSearching(true);
@@ -61,6 +121,7 @@ export default function Dashboard() {
     try {
       const results = await searchGrants(query, user?.id);
       setSearchResults(results);
+      setHasSearched(true);
 
       if (results.length === 0) {
         toast({
@@ -75,10 +136,10 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Search failed:', error);
-      setSearchError('Search failed. Please check your connection and try again.');
+      setSearchError('Search failed. The AI service may be rate-limited. Try using the manual filters below.');
       toast({
-        title: "Search failed",
-        description: "Please try again in a moment.",
+        title: "AI search unavailable",
+        description: "Use the manual filters instead.",
         variant: "destructive",
       });
     } finally {
@@ -87,7 +148,7 @@ export default function Dashboard() {
   };
 
   const handleSaveGrant = (grantId: string) => {
-    const grant = [...recommendedGrants, ...searchResults].find(g => g.id === grantId);
+    const grant = [...displayedGrants, ...searchResults].find(g => g.id === grantId);
     if (grant) {
       if (savedGrants.some(g => g.id === grantId)) {
         setSavedGrants(savedGrants.filter(g => g.id !== grantId));
@@ -118,6 +179,9 @@ export default function Dashboard() {
 
   if (!user) return null;
 
+  // Determine which grants to show
+  const grantsToShow = hasSearched ? searchResults : displayedGrants;
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -146,46 +210,37 @@ export default function Dashboard() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="discover" className="space-y-8">
+          <TabsContent value="discover" className="space-y-6">
+            {/* NLP Search */}
             <NLPSearchInput onSearch={handleSearch} isLoading={isSearching} />
 
             {/* Search Error */}
             {searchError && (
-              <Card className="border-destructive/50 bg-destructive/5">
+              <Card className="border-amber-500/50 bg-amber-500/5">
                 <CardContent className="flex items-center gap-3 py-4">
-                  <AlertCircle className="text-destructive" size={20} />
-                  <p className="text-sm text-destructive">{searchError}</p>
+                  <AlertCircle className="text-amber-500" size={20} />
+                  <p className="text-sm text-amber-700 dark:text-amber-400">{searchError}</p>
                 </CardContent>
               </Card>
             )}
 
-            {/* Search Results */}
-            {searchResults.length > 0 && (
-              <div>
-                <h2 className="text-xl font-semibold mb-4">
-                  Search Results
-                  <span className="text-muted-foreground text-base font-normal ml-2">
-                    ({searchResults.length} grants found)
-                  </span>
-                </h2>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.map((grant) => (
-                    <GrantCard
-                      key={grant.id}
-                      grant={grant}
-                      onSave={handleSaveGrant}
-                      isSaved={savedGrants.some(g => g.id === grant.id)}
-                      showMatchScore={true}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Manual Filters */}
+            <GrantFiltersComponent
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              onReset={handleResetFilters}
+            />
 
-            {/* Recommended Grants */}
+            {/* Results Section */}
             <div>
-              <h2 className="text-xl font-semibold mb-4">Recommended for You</h2>
-              {isLoadingRecommendations ? (
+              <h2 className="text-xl font-semibold mb-4">
+                {hasSearched ? 'Search Results' : 'Available Grants'}
+                <span className="text-muted-foreground text-base font-normal ml-2">
+                  ({grantsToShow.length} grants)
+                </span>
+              </h2>
+
+              {isLoadingGrants ? (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {[1, 2, 3].map((i) => (
                     <Card key={i} className="h-64 animate-pulse">
@@ -195,19 +250,19 @@ export default function Dashboard() {
                     </Card>
                   ))}
                 </div>
-              ) : recommendedGrants.length === 0 ? (
+              ) : grantsToShow.length === 0 ? (
                 <Card>
                   <CardContent className="flex flex-col items-center justify-center py-12">
                     <Search className="w-12 h-12 text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground">No grants available yet.</p>
+                    <p className="text-muted-foreground">No grants match your criteria.</p>
                     <p className="text-sm text-muted-foreground">
-                      Try searching for grants using the search box above.
+                      Try adjusting your filters or search terms.
                     </p>
                   </CardContent>
                 </Card>
               ) : (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {recommendedGrants.map((grant) => (
+                  {grantsToShow.map((grant) => (
                     <GrantCard
                       key={grant.id}
                       grant={grant}

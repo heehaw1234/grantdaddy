@@ -291,3 +291,112 @@ export async function getRecommendedGrants(userId: string): Promise<GrantWithSco
     const syntheticQuery = queryParts.join(' ') || 'general grants';
     return searchGrants(syntheticQuery, userId);
 }
+
+/**
+ * Manual filter options (without NLP)
+ */
+export interface ManualFilters {
+    issueArea: string | null;
+    scope: string | null;
+    fundingMin: number;
+    fundingMax: number;
+}
+
+/**
+ * Filter grants manually without using the Gemini API
+ * This is useful when users want direct control or when API quota is exceeded
+ */
+export async function filterGrantsManually(
+    filters: ManualFilters
+): Promise<GrantWithScore[]> {
+    let query = supabase
+        .from('grants')
+        .select('*')
+        .eq('is_active', true);
+
+    // Apply issue area filter
+    if (filters.issueArea) {
+        query = query.ilike('issue_area', `%${filters.issueArea}%`);
+    }
+
+    // Apply scope filter
+    if (filters.scope) {
+        query = query.ilike('scope', `%${filters.scope}%`);
+    }
+
+    // Apply funding filters
+    if (filters.fundingMin > 0) {
+        query = query.gte('funding_max', filters.fundingMin);
+    }
+    if (filters.fundingMax < 500000) {
+        query = query.lte('funding_min', filters.fundingMax);
+    }
+
+    // Only show grants with future deadlines
+    const today = new Date().toISOString().split('T')[0];
+    query = query.or(`application_due_date.gte.${today},application_due_date.is.null`);
+
+    const { data, error } = await query.order('application_due_date', { ascending: true });
+
+    if (error) {
+        console.error('Error filtering grants:', error);
+        throw error;
+    }
+
+    // Add match scores based on how many filters matched
+    const grants = (data as Grant[]) || [];
+    return grants.map(grant => {
+        const reasons: string[] = [];
+        let matchCount = 0;
+        const totalFilters = (filters.issueArea ? 1 : 0) +
+            (filters.scope ? 1 : 0) +
+            (filters.fundingMin > 0 || filters.fundingMax < 500000 ? 1 : 0);
+
+        if (filters.issueArea && grant.issue_area?.toLowerCase().includes(filters.issueArea.toLowerCase())) {
+            matchCount++;
+            reasons.push(`Matches ${grant.issue_area} focus`);
+        }
+        if (filters.scope && grant.scope?.toLowerCase().includes(filters.scope.toLowerCase())) {
+            matchCount++;
+            reasons.push(`${grant.scope} scope`);
+        }
+        if (filters.fundingMin > 0 || filters.fundingMax < 500000) {
+            matchCount++;
+            reasons.push(`Within funding range`);
+        }
+
+        // Calculate score (100% if all filters match, proportional otherwise)
+        const score = totalFilters > 0 ? Math.round((matchCount / totalFilters) * 100) : 75;
+
+        return {
+            ...grant,
+            matchScore: Math.max(50, score), // Minimum 50% since they passed the DB filters
+            matchReasons: reasons.length > 0 ? reasons : ['Matches your filters'],
+        };
+    });
+}
+
+/**
+ * Get all active grants (no filtering)
+ */
+export async function getAllGrants(): Promise<GrantWithScore[]> {
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+        .from('grants')
+        .select('*')
+        .eq('is_active', true)
+        .or(`application_due_date.gte.${today},application_due_date.is.null`)
+        .order('application_due_date', { ascending: true });
+
+    if (error) {
+        console.error('Error fetching grants:', error);
+        throw error;
+    }
+
+    return (data as Grant[] || []).map(grant => ({
+        ...grant,
+        matchScore: 50,
+        matchReasons: ['Active grant'],
+    }));
+}
