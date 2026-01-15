@@ -7,38 +7,20 @@ import { NLPSearchInput } from '@/components/NLPSearchInput';
 import { NewsletterSignup } from '@/components/NewsletterSignup';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Grant } from '@/types/database';
-import { Bookmark, Search, Bell } from 'lucide-react';
-
-// Sample grants for demo
-const sampleGrants: Grant[] = [
-  {
-    id: '1',
-    title: 'Community Climate Action Fund',
-    description: 'Supporting grassroots organizations working on climate adaptation.',
-    issue_area: 'Environment',
-    scope: 'National',
-    kpis: ['Carbon reduction', 'Community engagement'],
-    funding_min: 25000,
-    funding_max: 100000,
-    application_due_date: '2026-03-15',
-    eligibility_criteria: '501(c)(3) organizations',
-    funder_name: 'Green Future Foundation',
-    funder_url: 'https://example.com',
-    source_url: 'https://example.com/apply',
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+import { Bookmark, Search, Bell, AlertCircle } from 'lucide-react';
+import { searchGrants, getRecommendedGrants, GrantWithScore } from '@/services/grantMatcher';
+import { useToast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  const [savedGrants, setSavedGrants] = useState<Grant[]>([]);
-  const [recommendedGrants, setRecommendedGrants] = useState<Grant[]>(sampleGrants);
-  const [searchResults, setSearchResults] = useState<Grant[]>([]);
+  const { toast } = useToast();
+  const [savedGrants, setSavedGrants] = useState<GrantWithScore[]>([]);
+  const [recommendedGrants, setRecommendedGrants] = useState<GrantWithScore[]>([]);
+  const [searchResults, setSearchResults] = useState<GrantWithScore[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(true);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -46,11 +28,62 @@ export default function Dashboard() {
     }
   }, [user, loading, navigate]);
 
+  // Load recommended grants on mount
+  useEffect(() => {
+    async function loadRecommendations() {
+      if (!user) return;
+
+      try {
+        setIsLoadingRecommendations(true);
+        const recommendations = await getRecommendedGrants(user.id);
+        setRecommendedGrants(recommendations);
+      } catch (error) {
+        console.error('Failed to load recommendations:', error);
+        toast({
+          title: "Couldn't load recommendations",
+          description: "We'll try again when you refresh the page.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingRecommendations(false);
+      }
+    }
+
+    if (user) {
+      loadRecommendations();
+    }
+  }, [user, toast]);
+
   const handleSearch = async (query: string) => {
     setIsSearching(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setSearchResults(sampleGrants);
-    setIsSearching(false);
+    setSearchError(null);
+
+    try {
+      const results = await searchGrants(query, user?.id);
+      setSearchResults(results);
+
+      if (results.length === 0) {
+        toast({
+          title: "No grants found",
+          description: "Try broadening your search criteria.",
+        });
+      } else {
+        toast({
+          title: `Found ${results.length} matching grants`,
+          description: `Top match: ${results[0].matchScore}% relevance`,
+        });
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
+      setSearchError('Search failed. Please check your connection and try again.');
+      toast({
+        title: "Search failed",
+        description: "Please try again in a moment.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleSaveGrant = (grantId: string) => {
@@ -58,8 +91,16 @@ export default function Dashboard() {
     if (grant) {
       if (savedGrants.some(g => g.id === grantId)) {
         setSavedGrants(savedGrants.filter(g => g.id !== grantId));
+        toast({
+          title: "Grant removed",
+          description: "Removed from your saved grants.",
+        });
       } else {
         setSavedGrants([...savedGrants, grant]);
+        toast({
+          title: "Grant saved!",
+          description: "Added to your saved grants.",
+        });
       }
     }
   };
@@ -67,7 +108,10 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p>Loading...</p>
+        <div className="animate-pulse flex flex-col items-center gap-2">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -77,7 +121,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       <main className="container py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Welcome back!</h1>
@@ -104,10 +148,26 @@ export default function Dashboard() {
 
           <TabsContent value="discover" className="space-y-8">
             <NLPSearchInput onSearch={handleSearch} isLoading={isSearching} />
-            
+
+            {/* Search Error */}
+            {searchError && (
+              <Card className="border-destructive/50 bg-destructive/5">
+                <CardContent className="flex items-center gap-3 py-4">
+                  <AlertCircle className="text-destructive" size={20} />
+                  <p className="text-sm text-destructive">{searchError}</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Search Results */}
             {searchResults.length > 0 && (
               <div>
-                <h2 className="text-xl font-semibold mb-4">Search Results</h2>
+                <h2 className="text-xl font-semibold mb-4">
+                  Search Results
+                  <span className="text-muted-foreground text-base font-normal ml-2">
+                    ({searchResults.length} grants found)
+                  </span>
+                </h2>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {searchResults.map((grant) => (
                     <GrantCard
@@ -115,24 +175,49 @@ export default function Dashboard() {
                       grant={grant}
                       onSave={handleSaveGrant}
                       isSaved={savedGrants.some(g => g.id === grant.id)}
+                      showMatchScore={true}
                     />
                   ))}
                 </div>
               </div>
             )}
 
+            {/* Recommended Grants */}
             <div>
               <h2 className="text-xl font-semibold mb-4">Recommended for You</h2>
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {recommendedGrants.map((grant) => (
-                  <GrantCard
-                    key={grant.id}
-                    grant={grant}
-                    onSave={handleSaveGrant}
-                    isSaved={savedGrants.some(g => g.id === grant.id)}
-                  />
-                ))}
-              </div>
+              {isLoadingRecommendations ? (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {[1, 2, 3].map((i) => (
+                    <Card key={i} className="h-64 animate-pulse">
+                      <CardContent className="flex items-center justify-center h-full">
+                        <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : recommendedGrants.length === 0 ? (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <Search className="w-12 h-12 text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">No grants available yet.</p>
+                    <p className="text-sm text-muted-foreground">
+                      Try searching for grants using the search box above.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {recommendedGrants.map((grant) => (
+                    <GrantCard
+                      key={grant.id}
+                      grant={grant}
+                      onSave={handleSaveGrant}
+                      isSaved={savedGrants.some(g => g.id === grant.id)}
+                      showMatchScore={true}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -155,6 +240,7 @@ export default function Dashboard() {
                     grant={grant}
                     onSave={handleSaveGrant}
                     isSaved={true}
+                    showMatchScore={true}
                   />
                 ))}
               </div>
