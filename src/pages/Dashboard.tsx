@@ -211,6 +211,13 @@ export default function Dashboard() {
           </TabsList>
 
           <TabsContent value="discover" className="space-y-6">
+            {/* Manual Filters - moved above NLP search */}
+            <GrantFiltersComponent
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              onReset={handleResetFilters}
+            />
+
             {/* NLP Search */}
             <NLPSearchInput onSearch={handleSearch} isLoading={isSearching} />
 
@@ -223,13 +230,6 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             )}
-
-            {/* Manual Filters */}
-            <GrantFiltersComponent
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              onReset={handleResetFilters}
-            />
 
             {/* Results Section */}
             <div>

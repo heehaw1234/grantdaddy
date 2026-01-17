@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -8,8 +8,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { Filter, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
 
 export interface GrantFilters {
@@ -55,15 +55,6 @@ const FUNDING_PRESETS = [
 export function GrantFiltersComponent({ filters, onFiltersChange, onReset }: GrantFiltersProps) {
     const [isExpanded, setIsExpanded] = useState(false);
 
-    // Local state for slider to prevent stuttering
-    const [localFunding, setLocalFunding] = useState<[number, number]>([filters.fundingMin, filters.fundingMax]);
-    const debounceRef = useRef<NodeJS.Timeout | null>(null);
-
-    // Sync local funding with filters when filters change externally
-    useEffect(() => {
-        setLocalFunding([filters.fundingMin, filters.fundingMax]);
-    }, [filters.fundingMin, filters.fundingMax]);
-
     const hasActiveFilters =
         filters.issueArea !== null ||
         filters.scope !== null ||
@@ -87,7 +78,6 @@ export function GrantFiltersComponent({ filters, onFiltersChange, onReset }: Gra
     const handleFundingPresetChange = (value: string) => {
         const preset = FUNDING_PRESETS.find(p => p.label === value);
         if (preset) {
-            setLocalFunding([preset.min, preset.max]);
             onFiltersChange({
                 ...filters,
                 fundingMin: preset.min,
@@ -96,33 +86,7 @@ export function GrantFiltersComponent({ filters, onFiltersChange, onReset }: Gra
         }
     };
 
-    // Handle slider change with debouncing to prevent stuttering
-    const handleSliderChange = (values: number[]) => {
-        const [min, max] = values;
-        setLocalFunding([min, max]); // Update local state immediately for smooth UI
 
-        // Debounce the actual filter application
-        if (debounceRef.current) {
-            clearTimeout(debounceRef.current);
-        }
-
-        debounceRef.current = setTimeout(() => {
-            onFiltersChange({
-                ...filters,
-                fundingMin: min,
-                fundingMax: max,
-            });
-        }, 500); // Wait 500ms after user stops sliding
-    };
-
-    // Cleanup timeout on unmount
-    useEffect(() => {
-        return () => {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
-        };
-    }, []);
 
     const formatFunding = (value: number) => {
         if (value >= 1000) {
@@ -236,55 +200,38 @@ export function GrantFiltersComponent({ filters, onFiltersChange, onReset }: Gra
                         </div>
                     </div>
 
-                    {/* Custom Funding Slider */}
-                    <div className="space-y-3 pt-2">
-                        <div className="flex justify-between items-center">
-                            <Label className="text-sm text-muted-foreground">Custom funding range</Label>
-                            <span className="text-sm font-medium">
-                                {formatFunding(localFunding[0])} - {formatFunding(localFunding[1])}
-                            </span>
-                        </div>
-                        <div className="px-2">
-                            <Slider
-                                value={localFunding}
-                                min={0}
-                                max={500000}
-                                step={5000}
-                                onValueChange={handleSliderChange}
-                                className="w-full"
-                            />
-                        </div>
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>$0</span>
-                            <span>$500k+</span>
-                        </div>
-                    </div>
+
+
+
                 </CardContent>
-            )}
+            )
+            }
 
             {/* Compact filter pills when collapsed */}
-            {!isExpanded && hasActiveFilters && (
-                <CardContent className="pt-0">
-                    <div className="flex flex-wrap gap-2">
-                        {filters.issueArea && (
-                            <span className="px-2 py-1 text-xs bg-secondary rounded-full">
-                                {filters.issueArea}
-                            </span>
-                        )}
-                        {filters.scope && (
-                            <span className="px-2 py-1 text-xs bg-secondary rounded-full capitalize">
-                                {filters.scope}
-                            </span>
-                        )}
-                        {(filters.fundingMin > 0 || filters.fundingMax < 500000) && (
-                            <span className="px-2 py-1 text-xs bg-secondary rounded-full">
-                                {formatFunding(filters.fundingMin)} - {formatFunding(filters.fundingMax)}
-                            </span>
-                        )}
-                    </div>
-                </CardContent>
-            )}
-        </Card>
+            {
+                !isExpanded && hasActiveFilters && (
+                    <CardContent className="pt-0">
+                        <div className="flex flex-wrap gap-2">
+                            {filters.issueArea && (
+                                <span className="px-2 py-1 text-xs bg-secondary rounded-full">
+                                    {filters.issueArea}
+                                </span>
+                            )}
+                            {filters.scope && (
+                                <span className="px-2 py-1 text-xs bg-secondary rounded-full capitalize">
+                                    {filters.scope}
+                                </span>
+                            )}
+                            {(filters.fundingMin > 0 || filters.fundingMax < 500000) && (
+                                <span className="px-2 py-1 text-xs bg-secondary rounded-full">
+                                    {formatFunding(filters.fundingMin)} - {formatFunding(filters.fundingMax)}
+                                </span>
+                            )}
+                        </div>
+                    </CardContent>
+                )
+            }
+        </Card >
     );
 }
 
