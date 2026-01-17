@@ -25,16 +25,15 @@ interface GrantFiltersProps {
     onReset: () => void;
 }
 
-// Issue areas based on your database/seed data
+// Issue areas based on actual Singapore grant database
 const ISSUE_AREAS = [
-    'Environment',
-    'Education',
+    'Youth Development',
     'Healthcare',
     'Arts & Culture',
+    'Sports & Wellness',
+    'Environment',
     'Community Development',
-    'Youth Development',
-    'Elderly Care',
-    'Technology',
+    'General',
 ];
 
 const SCOPES = [

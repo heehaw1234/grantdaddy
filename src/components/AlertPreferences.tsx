@@ -16,15 +16,15 @@ import {
     DEFAULT_ALERT_PREFERENCES
 } from '@/services/emailAlertService';
 
+// Issue areas based on actual Singapore grant database
 const ISSUE_AREAS = [
-    'Environment',
-    'Education',
+    'Youth Development',
     'Healthcare',
     'Arts & Culture',
+    'Sports & Wellness',
+    'Environment',
     'Community Development',
-    'Youth Development',
-    'Elderly Care',
-    'Technology',
+    'General',
 ];
 
 const SCOPES = [

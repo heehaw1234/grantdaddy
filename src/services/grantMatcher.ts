@@ -1,7 +1,11 @@
 import { supabase } from '@/integrations/supabase/client';
-import { parseGrantQuery, ParsedGrantQuery } from '@/integrations/supabase/groq';
-// import { parseGrantQuery, ParsedGrantQuery } from '@/integrations/supabase/gemini';
 import { Grant } from '@/types/database';
+import {
+    scoreGrantsSemantically,
+    filterByThreshold,
+    GrantScore,
+    UserMatchPreferences
+} from './semanticMatcher';
 
 /**
  * Grant with relevance score for ranked results
@@ -22,152 +26,32 @@ export interface UserPreferences {
 }
 
 /**
- * Scoring weights - adjust these to tune matching behavior
- * Future: could be personalized per user or learned from behavior
+ * Fetch all active grants from Supabase
+ * Pre-filtering happens before LLM scoring to reduce API calls
  */
-const SCORING_WEIGHTS = {
-    issueAreaMatch: 0.35,
-    fundingRangeMatch: 0.25,
-    scopeMatch: 0.15,
-    deadlineProximity: 0.10,
-    keywordMatch: 0.10,
-    userPreferenceBonus: 0.05,
-};
-
-/**
- * Calculate match score between a grant and parsed query criteria
- */
-function calculateMatchScore(
-    grant: Grant,
-    criteria: ParsedGrantQuery,
-    userPrefs?: UserPreferences
-): { score: number; reasons: string[] } {
-    let score = 0;
-    const reasons: string[] = [];
-
-    // Issue area matching (35%)
-    if (criteria.issueAreas.length > 0 && grant.issue_area) {
-        const grantArea = grant.issue_area.toLowerCase();
-        const matchedArea = criteria.issueAreas.find(area =>
-            grantArea.includes(area.toLowerCase()) ||
-            area.toLowerCase().includes(grantArea)
-        );
-        if (matchedArea) {
-            score += SCORING_WEIGHTS.issueAreaMatch;
-            reasons.push(`Matches ${grant.issue_area} focus area`);
-        }
-    } else if (criteria.issueAreas.length === 0) {
-        // No specific area requested, give partial credit
-        score += SCORING_WEIGHTS.issueAreaMatch * 0.5;
-    }
-
-    // Funding range matching (25%)
-    if (grant.funding_min !== null || grant.funding_max !== null) {
-        const grantMin = grant.funding_min || 0;
-        const grantMax = grant.funding_max || Infinity;
-        const queryMin = criteria.fundingMin || 0;
-        const queryMax = criteria.fundingMax || Infinity;
-
-        // Check if ranges overlap
-        if (grantMin <= queryMax && grantMax >= queryMin) {
-            score += SCORING_WEIGHTS.fundingRangeMatch;
-            reasons.push(`Funding range fits your budget`);
-        } else if (queryMin === 0 && queryMax === Infinity) {
-            // No funding preference specified
-            score += SCORING_WEIGHTS.fundingRangeMatch * 0.5;
-        }
-    }
-
-    // Scope matching (15%)
-    if (criteria.scope && grant.scope) {
-        if (grant.scope.toLowerCase() === criteria.scope.toLowerCase()) {
-            score += SCORING_WEIGHTS.scopeMatch;
-            reasons.push(`${grant.scope} scope matches preference`);
-        }
-    } else if (!criteria.scope) {
-        score += SCORING_WEIGHTS.scopeMatch * 0.5;
-    }
-
-    // Deadline proximity (10%) - prioritize upcoming deadlines
-    if (grant.application_due_date) {
-        const dueDate = new Date(grant.application_due_date);
-        const today = new Date();
-        const daysUntilDue = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-
-        if (daysUntilDue > 0 && daysUntilDue <= 90) {
-            // Closer deadlines get higher scores (but still active)
-            const proximityScore = Math.max(0, 1 - (daysUntilDue / 90));
-            score += SCORING_WEIGHTS.deadlineProximity * proximityScore;
-            if (daysUntilDue <= 30) {
-                reasons.push(`Deadline in ${daysUntilDue} days`);
-            }
-        } else if (daysUntilDue > 90) {
-            score += SCORING_WEIGHTS.deadlineProximity * 0.3;
-        }
-    }
-
-    // Keyword matching (10%)
-    if (criteria.keywords.length > 0) {
-        const grantText = `${grant.title} ${grant.description || ''} ${grant.eligibility_criteria || ''}`.toLowerCase();
-        const matchedKeywords = criteria.keywords.filter(kw => grantText.includes(kw.toLowerCase()));
-        if (matchedKeywords.length > 0) {
-            const keywordScore = Math.min(1, matchedKeywords.length / criteria.keywords.length);
-            score += SCORING_WEIGHTS.keywordMatch * keywordScore;
-            if (matchedKeywords.length >= 2) {
-                reasons.push(`Matches keywords: ${matchedKeywords.slice(0, 2).join(', ')}`);
-            }
-        }
-    }
-
-    // User preference bonus (5%)
-    if (userPrefs) {
-        let prefMatch = 0;
-        if (userPrefs.issueAreas?.some(area =>
-            grant.issue_area?.toLowerCase().includes(area.toLowerCase())
-        )) {
-            prefMatch += 0.5;
-        }
-        if (userPrefs.preferredScope &&
-            grant.scope?.toLowerCase() === userPrefs.preferredScope.toLowerCase()) {
-            prefMatch += 0.5;
-        }
-        if (prefMatch > 0) {
-            score += SCORING_WEIGHTS.userPreferenceBonus * prefMatch;
-            reasons.push(`Matches your saved preferences`);
-        }
-    }
-
-    // Normalize score to 0-100 percentage
-    const normalizedScore = Math.round(Math.min(100, score * 100));
-
-    return { score: normalizedScore, reasons };
-}
-
-/**
- * Fetch grants from Supabase with optional filters
- */
-async function fetchGrants(criteria: ParsedGrantQuery): Promise<Grant[]> {
+async function fetchAllActiveGrants(filters?: {
+    issueArea?: string | null;
+    scope?: string | null;
+    fundingMin?: number;
+    fundingMax?: number;
+}): Promise<Grant[]> {
     let query = supabase
         .from('grants')
         .select('*')
         .eq('is_active', true);
 
-    // Apply funding filters if specified
-    if (criteria.fundingMin !== null) {
-        query = query.gte('funding_max', criteria.fundingMin);
+    // Apply hard filters if specified (reduces grants before LLM scoring)
+    if (filters?.issueArea) {
+        query = query.ilike('issue_area', `%${filters.issueArea}%`);
     }
-    if (criteria.fundingMax !== null) {
-        query = query.lte('funding_min', criteria.fundingMax);
+    if (filters?.scope) {
+        query = query.ilike('scope', `%${filters.scope}%`);
     }
-
-    // Apply scope filter if specified
-    if (criteria.scope) {
-        query = query.ilike('scope', `%${criteria.scope}%`);
+    if (filters?.fundingMin && filters.fundingMin > 0) {
+        query = query.gte('funding_max', filters.fundingMin);
     }
-
-    // Apply deadline filter if specified
-    if (criteria.deadlineBefore) {
-        query = query.lte('application_due_date', criteria.deadlineBefore);
+    if (filters?.fundingMax && filters.fundingMax < 500000) {
+        query = query.lte('funding_min', filters.fundingMax);
     }
 
     // Only show grants with future deadlines
@@ -212,44 +96,64 @@ async function fetchUserPreferences(userId: string): Promise<UserPreferences | n
 }
 
 /**
- * Main search function - takes natural language query and returns scored grants
+ * Main search function - uses LLM semantic scoring for accurate matching
+ * Takes natural language query and returns semantically scored grants
  */
 export async function searchGrants(
     query: string,
-    userId?: string
+    userId?: string,
+    filters?: {
+        issueArea?: string | null;
+        scope?: string | null;
+        fundingMin?: number;
+        fundingMax?: number;
+    }
 ): Promise<GrantWithScore[]> {
-    // Parse the natural language query using Gemini
-    const criteria = await parseGrantQuery(query);
-    console.log('Parsed query criteria:', criteria);
+    console.log('🔍 Starting semantic search:', query);
 
-    // Fetch matching grants from database
-    const grants = await fetchGrants(criteria);
-
-    // Fetch user preferences if user is logged in
-    let userPrefs: UserPreferences | null = null;
+    // Fetch user preferences if logged in
+    let userPrefs: UserMatchPreferences | undefined;
     if (userId) {
-        userPrefs = await fetchUserPreferences(userId);
+        const prefs = await fetchUserPreferences(userId);
+        if (prefs) {
+            userPrefs = {
+                issueAreas: prefs.issueAreas,
+                preferredScope: prefs.preferredScope,
+                fundingMin: prefs.fundingMin,
+                fundingMax: prefs.fundingMax,
+            };
+        }
     }
 
-    // Score and sort grants
-    const scoredGrants: GrantWithScore[] = grants.map(grant => {
-        const { score, reasons } = calculateMatchScore(grant, criteria, userPrefs || undefined);
-        return {
-            ...grant,
-            matchScore: score,
-            matchReasons: reasons,
-        };
-    });
+    // Fetch grants (with optional pre-filtering to reduce LLM calls)
+    const grants = await fetchAllActiveGrants(filters);
+    console.log(`📚 Fetched ${grants.length} grants to score`);
 
-    // Sort by score (highest first)
-    scoredGrants.sort((a, b) => b.matchScore - a.matchScore);
-
-    // Filter out very low matches if we have good matches
-    const hasGoodMatches = scoredGrants.some(g => g.matchScore >= 50);
-    if (hasGoodMatches) {
-        return scoredGrants.filter(g => g.matchScore >= 20);
+    if (grants.length === 0) {
+        return [];
     }
 
+    // Use semantic LLM scoring
+    const scores = await scoreGrantsSemantically(query, grants, userPrefs);
+
+    // Filter by threshold and create scored grant objects
+    const thresholdScores = filterByThreshold(scores, 30);
+
+    // Map scores to full grant objects
+    const grantsMap = new Map(grants.map(g => [g.id, g]));
+    const scoredGrants: GrantWithScore[] = thresholdScores
+        .map(score => {
+            const grant = grantsMap.get(score.grantId);
+            if (!grant) return null;
+            return {
+                ...grant,
+                matchScore: score.score,
+                matchReasons: score.reasons,
+            };
+        })
+        .filter((g): g is GrantWithScore => g !== null);
+
+    console.log(`✅ Returning ${scoredGrants.length} matches (threshold: 30%)`);
     return scoredGrants;
 }
 
@@ -400,4 +304,62 @@ export async function getAllGrants(): Promise<GrantWithScore[]> {
         matchScore: 50,
         matchReasons: ['Active grant'],
     }));
+}
+
+/**
+ * Simple keyword search without LLM - instant results
+ * Useful as fallback when AI is rate-limited
+ */
+export async function searchGrantsByKeyword(
+    keyword: string
+): Promise<GrantWithScore[]> {
+    const today = new Date().toISOString().split('T')[0];
+    const searchTerm = keyword.toLowerCase().trim();
+
+    const { data, error } = await supabase
+        .from('grants')
+        .select('*')
+        .eq('is_active', true)
+        .or(`application_due_date.gte.${today},application_due_date.is.null`);
+
+    if (error) {
+        console.error('Error searching grants:', error);
+        throw error;
+    }
+
+    const grants = (data as Grant[]) || [];
+
+    // Score based on keyword matches
+    const scoredGrants = grants.map(grant => {
+        const titleMatch = grant.title?.toLowerCase().includes(searchTerm);
+        const descMatch = grant.description?.toLowerCase().includes(searchTerm);
+        const eligMatch = grant.eligibility_criteria?.toLowerCase().includes(searchTerm);
+        const areaMatch = grant.issue_area?.toLowerCase().includes(searchTerm);
+
+        const matchCount = [titleMatch, descMatch, eligMatch, areaMatch].filter(Boolean).length;
+        const reasons: string[] = [];
+
+        if (titleMatch) reasons.push(`Title contains "${keyword}"`);
+        if (descMatch) reasons.push(`Description mentions "${keyword}"`);
+        if (eligMatch) reasons.push(`Eligibility mentions "${keyword}"`);
+        if (areaMatch) reasons.push(`Issue area: ${grant.issue_area}`);
+
+        // Calculate score based on match quality
+        let score = 0;
+        if (titleMatch) score += 40;  // Title match is most important
+        if (areaMatch) score += 25;   // Issue area match
+        if (descMatch) score += 20;   // Description match
+        if (eligMatch) score += 15;   // Eligibility match
+
+        return {
+            ...grant,
+            matchScore: Math.min(100, score),
+            matchReasons: reasons.length > 0 ? reasons : ['No direct keyword match'],
+        };
+    });
+
+    // Filter and sort
+    return scoredGrants
+        .filter(g => g.matchScore > 0)
+        .sort((a, b) => b.matchScore - a.matchScore);
 }

@@ -8,6 +8,7 @@ import { GrantFiltersComponent, GrantFilters, DEFAULT_FILTERS } from '@/componen
 import { AlertPreferences } from '@/components/AlertPreferences';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
 import { Bookmark, Search, Bell, AlertCircle } from 'lucide-react';
 import { searchGrants, filterGrantsManually, getAllGrants, GrantWithScore } from '@/services/grantMatcher';
 import { useToast } from '@/hooks/use-toast';
@@ -24,6 +25,7 @@ export default function Dashboard() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [filters, setFilters] = useState<GrantFilters>(DEFAULT_FILTERS);
   const [hasSearched, setHasSearched] = useState(false);
+  const [nameFilter, setNameFilter] = useState('');
 
   useEffect(() => {
     if (!loading && !user) {
@@ -148,7 +150,9 @@ export default function Dashboard() {
   };
 
   const handleSaveGrant = (grantId: string) => {
-    const grant = [...displayedGrants, ...searchResults].find(g => g.id === grantId);
+    // Prefer searchResults (has real scores) over displayedGrants (has default 50% scores)
+    const grant = searchResults.find(g => g.id === grantId)
+      || displayedGrants.find(g => g.id === grantId);
     if (grant) {
       if (savedGrants.some(g => g.id === grantId)) {
         setSavedGrants(savedGrants.filter(g => g.id !== grantId));
@@ -157,7 +161,15 @@ export default function Dashboard() {
           description: "Removed from your saved grants.",
         });
       } else {
-        setSavedGrants([...savedGrants, grant]);
+        // Also update if the grant exists but with different score
+        const existingIndex = savedGrants.findIndex(g => g.id === grantId);
+        if (existingIndex >= 0) {
+          const updated = [...savedGrants];
+          updated[existingIndex] = grant;
+          setSavedGrants(updated);
+        } else {
+          setSavedGrants([...savedGrants, grant]);
+        }
         toast({
           title: "Grant saved!",
           description: "Added to your saved grants.",
@@ -233,12 +245,24 @@ export default function Dashboard() {
 
             {/* Results Section */}
             <div>
-              <h2 className="text-xl font-semibold mb-4">
-                {hasSearched ? 'Search Results' : 'Available Grants'}
-                <span className="text-muted-foreground text-base font-normal ml-2">
-                  ({grantsToShow.length} grants)
-                </span>
-              </h2>
+              {/* Quick name search */}
+              <div className="flex items-center gap-4 mb-4">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+                  <Input
+                    placeholder="Filter by grant name..."
+                    value={nameFilter}
+                    onChange={(e) => setNameFilter(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <h2 className="text-xl font-semibold">
+                  {hasSearched ? 'Search Results' : 'Available Grants'}
+                  <span className="text-muted-foreground text-base font-normal ml-2">
+                    ({grantsToShow.filter(g => !nameFilter || g.title?.toLowerCase().includes(nameFilter.toLowerCase())).length} grants)
+                  </span>
+                </h2>
+              </div>
 
               {isLoadingGrants ? (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -250,27 +274,29 @@ export default function Dashboard() {
                     </Card>
                   ))}
                 </div>
-              ) : grantsToShow.length === 0 ? (
+              ) : grantsToShow.filter(g => !nameFilter || g.title?.toLowerCase().includes(nameFilter.toLowerCase())).length === 0 ? (
                 <Card>
                   <CardContent className="flex flex-col items-center justify-center py-12">
                     <Search className="w-12 h-12 text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground">No grants match your criteria.</p>
+                    <p className="text-muted-foreground">No grants found matching your criteria.</p>
                     <p className="text-sm text-muted-foreground">
-                      Try adjusting your filters or search terms.
+                      Try adjusting your search or filters to find more grants.
                     </p>
                   </CardContent>
                 </Card>
               ) : (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {grantsToShow.map((grant) => (
-                    <GrantCard
-                      key={grant.id}
-                      grant={grant}
-                      onSave={handleSaveGrant}
-                      isSaved={savedGrants.some(g => g.id === grant.id)}
-                      showMatchScore={true}
-                    />
-                  ))}
+                  {grantsToShow
+                    .filter(g => !nameFilter || g.title?.toLowerCase().includes(nameFilter.toLowerCase()))
+                    .map((grant) => (
+                      <GrantCard
+                        key={grant.id}
+                        grant={grant}
+                        onSave={handleSaveGrant}
+                        isSaved={savedGrants.some(g => g.id === grant.id)}
+                        showMatchScore={true}
+                      />
+                    ))}
                 </div>
               )}
             </div>
@@ -307,6 +333,6 @@ export default function Dashboard() {
           </TabsContent>
         </Tabs>
       </main>
-    </div>
+    </div >
   );
 }
