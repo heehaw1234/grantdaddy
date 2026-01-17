@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
 import { Filter, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
 
 export interface GrantFilters {
@@ -178,24 +179,35 @@ export function GrantFiltersComponent({ filters, onFiltersChange, onReset }: Gra
                             </Select>
                         </div>
 
-                        {/* Funding Range Filter */}
-                        <div className="space-y-2">
-                            <Label htmlFor="funding">Funding Range</Label>
-                            <Select
-                                value={getCurrentFundingPreset()}
-                                onValueChange={handleFundingPresetChange}
-                            >
-                                <SelectTrigger id="funding">
-                                    <SelectValue placeholder="Any amount" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {FUNDING_PRESETS.map((preset) => (
-                                        <SelectItem key={preset.label} value={preset.label}>
-                                            {preset.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                        {/* Funding Range Filter - Dual Handle Slider */}
+                        <div className="space-y-3 md:col-span-2">
+                            <div className="flex items-center justify-between">
+                                <Label>Funding Range</Label>
+                                <span className="text-sm text-muted-foreground">
+                                    {formatFunding(filters.fundingMin)} - {formatFunding(filters.fundingMax)}
+                                </span>
+                            </div>
+                            <div className="px-2">
+                                <Slider
+                                    value={[filters.fundingMin, filters.fundingMax]}
+                                    min={0}
+                                    max={500000}
+                                    step={5000}
+                                    onValueChange={([min, max]) => {
+                                        onFiltersChange({
+                                            ...filters,
+                                            fundingMin: min,
+                                            fundingMax: max,
+                                        });
+                                    }}
+                                    className="w-full"
+                                />
+                            </div>
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>$0</span>
+                                <span>$250k</span>
+                                <span>$500k</span>
+                            </div>
                         </div>
                     </div>
 

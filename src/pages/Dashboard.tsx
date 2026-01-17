@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Bookmark, Search, Bell, AlertCircle } from 'lucide-react';
-import { searchGrants, filterGrantsManually, getAllGrants, GrantWithScore } from '@/services/grantMatcher';
+import { searchGrants, filterGrantsManually, getAllGrants, GrantWithScore, fetchUserPreferences, updateUserPreferences } from '@/services/grantMatcher';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
@@ -23,9 +23,48 @@ export default function Dashboard() {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingGrants, setIsLoadingGrants] = useState(true);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<GrantFilters>(DEFAULT_FILTERS);
   const [hasSearched, setHasSearched] = useState(false);
   const [nameFilter, setNameFilter] = useState('');
+  const [filters, setFilters] = useState<GrantFilters>(DEFAULT_FILTERS);
+
+  // Load filters from Supabase user_preferences on mount
+  useEffect(() => {
+    async function loadPreferences() {
+      if (!user?.id) return;
+
+      const prefs = await fetchUserPreferences(user.id);
+      if (prefs) {
+        setFilters({
+          issueArea: prefs.issueAreas?.[0] || null,
+          scope: prefs.preferredScope || null,
+          fundingMin: prefs.fundingMin || 0,
+          fundingMax: prefs.fundingMax || 500000,
+        });
+        console.log('📥 Loaded filters from Supabase:', prefs);
+      }
+    }
+
+    if (user) {
+      loadPreferences();
+    }
+  }, [user]);
+
+  // Persist saved grants to localStorage (grants themselves, not filters)
+  useEffect(() => {
+    localStorage.setItem('savedGrants', JSON.stringify(savedGrants));
+  }, [savedGrants]);
+
+  // Load saved grants from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('savedGrants');
+    if (saved) {
+      try {
+        setSavedGrants(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse saved grants:', e);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -102,17 +141,41 @@ export default function Dashboard() {
     }
   }, [toast]);
 
-  const handleFiltersChange = (newFilters: GrantFilters) => {
+  const handleFiltersChange = async (newFilters: GrantFilters) => {
     setFilters(newFilters);
-    setHasSearched(false); // Clear NLP search results when using manual filters
-    setSearchResults([]);
-    applyFilters(newFilters);
+
+    // Save to Supabase
+    if (user?.id) {
+      await updateUserPreferences(user.id, {
+        issueArea: newFilters.issueArea,
+        scope: newFilters.scope,
+        fundingMin: newFilters.fundingMin,
+        fundingMax: newFilters.fundingMax,
+      });
+    }
+
+    // If we have NLP results, keep them but filters will apply on top
+    // If no NLP results, apply filters to all grants
+    if (!hasSearched) {
+      applyFilters(newFilters);
+    }
   };
 
-  const handleResetFilters = () => {
+  const handleResetFilters = async () => {
     setFilters(DEFAULT_FILTERS);
     setHasSearched(false);
     setSearchResults([]);
+
+    // Save reset to Supabase
+    if (user?.id) {
+      await updateUserPreferences(user.id, {
+        issueArea: null,
+        scope: null,
+        fundingMin: 0,
+        fundingMax: 500000,
+      });
+    }
+
     applyFilters(DEFAULT_FILTERS);
   };
 
@@ -191,8 +254,24 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  // Determine which grants to show
-  const grantsToShow = hasSearched ? searchResults : displayedGrants;
+  // Determine which grants to show - apply manual filters on top of NLP results
+  const baseGrants = hasSearched ? searchResults : displayedGrants;
+  const grantsToShow = baseGrants.filter(grant => {
+    // Apply manual filters on top of NLP results
+    if (filters.issueArea && !grant.issue_area?.toLowerCase().includes(filters.issueArea.toLowerCase())) {
+      return false;
+    }
+    if (filters.scope && !grant.scope?.toLowerCase().includes(filters.scope.toLowerCase())) {
+      return false;
+    }
+    if (filters.fundingMin > 0 && (grant.funding_max || 0) < filters.fundingMin) {
+      return false;
+    }
+    if (filters.fundingMax < 500000 && (grant.funding_min || 0) > filters.fundingMax) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-background">

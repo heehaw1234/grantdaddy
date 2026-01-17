@@ -29,6 +29,8 @@ export interface ExtractedFilters {
     scope?: string | null;
     fundingMin?: number | null;
     fundingMax?: number | null;
+    funder?: string | null;
+    deadlineWithin?: number | null; // Days: 30, 60, 90
 }
 
 /**
@@ -131,12 +133,12 @@ Scoring guide:
 - 30-49: Weak fit - only loosely connected
 - 0-29: Not relevant
 
-For each grant, write friendly, natural reasons explaining why it matches. Use "you" to address the person directly. Examples:
-- "This grant directly supports what you're looking for"
-- "You'd likely qualify as an individual applicant"
-- "The funding range fits your budget"
+For each grant, provide reasons in this format (using "you" to address the person):
+- "Why the purpose matches: [explanation of how grant purpose aligns with your needs]"
+- "Why you may qualify: [eligibility assessment]"
+- "About the funding: [funding range and fit]"
 
-Also identify any filters mentioned (issue area, scope, funding range).
+Also extract any filters mentioned (issue area, scope, funding range, funder, deadline preferences).
 
 Return valid JSON only:
 {
@@ -144,13 +146,15 @@ Return valid JSON only:
     "issueArea": "Youth Development" or null,
     "scope": "national" or "local" or "international" or null,
     "fundingMin": number or null,
-    "fundingMax": number or null
+    "fundingMax": number or null,
+    "funder": "foundation name" or null,
+    "deadlineWithin": 30 or 60 or 90 or null
   },
   "scores": [
     {
       "id": "grant-uuid",
       "score": 85,
-      "reasons": ["This grant supports youth volunteering, which matches your interest", "You can apply as an individual", "Up to $20,000 available"]
+      "reasons": ["Why the purpose matches: This grant directly supports your interest in youth volunteering", "Why you may qualify: Open to individuals and organizations", "About the funding: Up to $20,000 available"]
     }
   ]
 }`;

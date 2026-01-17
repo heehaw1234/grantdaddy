@@ -71,7 +71,7 @@ async function fetchAllActiveGrants(filters?: {
 /**
  * Fetch user preferences from Supabase
  */
-async function fetchUserPreferences(userId: string): Promise<UserPreferences | null> {
+export async function fetchUserPreferences(userId: string): Promise<UserPreferences | null> {
     const { data, error } = await supabase
         .from('user_preferences')
         .select('issue_areas, preferred_scope, funding_min, funding_max')
@@ -93,6 +93,56 @@ async function fetchUserPreferences(userId: string): Promise<UserPreferences | n
         fundingMin: data.funding_min || undefined,
         fundingMax: data.funding_max || undefined,
     };
+}
+
+/**
+ * Update user preferences in Supabase (for AI extracted filters and manual filter sync)
+ */
+export async function updateUserPreferences(
+    userId: string,
+    preferences: {
+        issueArea?: string | null;
+        scope?: string | null;
+        fundingMin?: number;
+        fundingMax?: number;
+    }
+): Promise<boolean> {
+    console.log('📝 Saving preferences to Supabase:', preferences);
+
+    const updateData: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+    };
+
+    // Only update fields that are explicitly set
+    if (preferences.issueArea !== undefined) {
+        updateData.issue_areas = preferences.issueArea ? [preferences.issueArea] : [];
+    }
+    if (preferences.scope !== undefined) {
+        updateData.preferred_scope = preferences.scope;
+    }
+    if (preferences.fundingMin !== undefined) {
+        updateData.funding_min = preferences.fundingMin;
+    }
+    if (preferences.fundingMax !== undefined) {
+        updateData.funding_max = preferences.fundingMax;
+    }
+
+    const { error } = await supabase
+        .from('user_preferences')
+        .upsert({
+            user_id: userId,
+            ...updateData,
+        }, {
+            onConflict: 'user_id',
+        });
+
+    if (error) {
+        console.error('Failed to update user preferences:', error);
+        return false;
+    }
+
+    console.log('✅ Preferences saved successfully');
+    return true;
 }
 
 /**
