@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
-import { parseGrantQuery, ParsedGrantQuery } from '@/integrations/supabase/gemini';
+import { parseGrantQuery, ParsedGrantQuery } from '@/integrations/supabase/groq';
+// import { parseGrantQuery, ParsedGrantQuery } from '@/integrations/supabase/gemini';
 import { Grant } from '@/types/database';
 
 /**

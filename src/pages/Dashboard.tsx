@@ -5,7 +5,7 @@ import { Header } from '@/components/Header';
 import { GrantCard } from '@/components/GrantCard';
 import { NLPSearchInput } from '@/components/NLPSearchInput';
 import { GrantFiltersComponent, GrantFilters, DEFAULT_FILTERS } from '@/components/GrantFilters';
-import { NewsletterSignup } from '@/components/NewsletterSignup';
+import { AlertPreferences } from '@/components/AlertPreferences';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Bookmark, Search, Bell, AlertCircle } from 'lucide-react';
@@ -303,22 +303,7 @@ export default function Dashboard() {
           </TabsContent>
 
           <TabsContent value="alerts">
-            <div className="max-w-xl">
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>Grant Alert Preferences</CardTitle>
-                  <CardDescription>
-                    Set up your preferences to receive daily notifications about new grants.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Complete your profile preferences to get personalized grant recommendations.
-                  </p>
-                </CardContent>
-              </Card>
-              <NewsletterSignup />
-            </div>
+            <AlertPreferences />
           </TabsContent>
         </Tabs>
       </main>

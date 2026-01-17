@@ -1,0 +1,6 @@
+# Supabase Edge Functions Configuration
+
+[functions.send-grant-alerts]
+# Disable JWT verification to allow calls from the client
+# The function still uses service role key internally for database access
+verify_jwt = false
