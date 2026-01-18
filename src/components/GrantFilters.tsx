@@ -116,12 +116,18 @@ export function GrantFiltersComponent({ filters, onFiltersChange, onReset }: Gra
                         )}
                     </CardTitle>
                     <div className="flex items-center gap-2">
-                        {hasActiveFilters && (
-                            <Button variant="ghost" size="sm" onClick={onReset} className="text-muted-foreground">
-                                <RotateCcw size={14} className="mr-1" />
-                                Reset
-                            </Button>
-                        )}
+                        {/* Always show reset button to avoid confusing disappearance */}
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={onReset}
+                            disabled={!hasActiveFilters}
+                            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                            title={hasActiveFilters ? "Reset all filters" : "No active filters to reset"}
+                        >
+                            <RotateCcw size={14} className="mr-1" />
+                            Reset
+                        </Button>
                         <Button
                             variant="ghost"
                             size="icon"

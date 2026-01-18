@@ -159,13 +159,15 @@ export async function searchGrants(
         scope?: string | null;
         fundingMin?: number;
         fundingMax?: number;
-    }
+    },
+    useProfilePreferences: boolean = true
 ): Promise<GrantWithScore[]> {
     console.log('🔍 Starting semantic search:', query);
+    console.log(`👤 Profile preferences: ${useProfilePreferences ? 'ENABLED' : 'DISABLED'}`);
 
-    // Fetch user preferences if logged in
+    // Fetch user preferences if logged in AND if enabled
     let userPrefs: UserMatchPreferences | undefined;
-    if (userId) {
+    if (userId && useProfilePreferences) {
         const prefs = await fetchUserPreferences(userId);
         if (prefs) {
             userPrefs = {
@@ -174,7 +176,10 @@ export async function searchGrants(
                 fundingMin: prefs.fundingMin,
                 fundingMax: prefs.fundingMax,
             };
+            console.log(`✓ Using user preferences:`, userPrefs);
         }
+    } else if (userId && !useProfilePreferences) {
+        console.log(`⊘ Profile preferences disabled - scoring based on query only`);
     }
 
     // Fetch grants (with optional pre-filtering to reduce LLM calls)

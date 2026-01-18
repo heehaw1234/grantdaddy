@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Bookmark, Search, Bell, AlertCircle, Plus, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { searchGrants, filterGrantsManually, getAllGrants, GrantWithScore, fetchUserPreferences } from '@/services/grantMatcher';
+import { loadOrganizationProfile, OrganizationProfile } from '@/services/userPreferencesService';
 import {
   getSavedGrants,
   saveGrant,
@@ -33,7 +34,14 @@ export default function Dashboard() {
   const { toast } = useToast();
 
   // Use search context for state persistence
-  const { state: searchState, setSearchResults, setFilters: setContextFilters, setActiveTab, clearSearch } = useSearch();
+  const {
+    state: searchState,
+    setSearchResults,
+    setFilters: setContextFilters,
+    setActiveTab,
+    setUseProfileFilters: setContextUseProfileFilters,
+    clearSearch
+  } = useSearch();
 
   // Saved grants state (from Supabase)
   const [savedGrants, setSavedGrants] = useState<SavedGrant[]>([]);
@@ -54,36 +62,66 @@ export default function Dashboard() {
   const [isLoadingSaved, setIsLoadingSaved] = useState(true);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [nameFilter, setNameFilter] = useState('');
-  const [useProfileFilters, setUseProfileFilters] = useState(true); // Default to using profile preferences
+  const [userProfile, setUserProfile] = useState<OrganizationProfile | undefined>();
 
-  // Use context state for filters and search results
+  // Use context state for filters, search results, and profile preferences
   const filters = searchState.filters;
   const searchResults = searchState.searchResults;
   const hasSearched = searchState.hasSearched;
+  const useProfileFilters = searchState.useProfileFilters;
 
-  // Load filters from Supabase on mount (only if not already set in context)
+  // Load filters from Supabase ONLY if profile preferences are enabled
   useEffect(() => {
     async function loadPreferences() {
       if (!user?.id) return;
 
-      // Only load from DB if context has default filters
-      if (filters === DEFAULT_FILTERS) {
-        const prefs = await fetchUserPreferences(user.id);
-        if (prefs) {
-          const loadedFilters = {
-            issueArea: prefs.issueAreas?.[0] || null,
-            scope: prefs.preferredScope || null,
-            fundingMin: prefs.fundingMin || 0,
-            fundingMax: prefs.fundingMax || 500000,
-          };
-          setContextFilters(loadedFilters);
-          console.log('📥 Loaded filters from Supabase:', prefs);
+      console.log('🔄 [LOAD] useProfileFilters state:', useProfileFilters);
+      console.log('🔄 [LOAD] hasSearched:', hasSearched);
+
+      // Only load profile preferences if checkbox is ON (regardless of search state)
+      if (useProfileFilters) {
+        console.log('✓ [LOAD] Profile preferences enabled - loading from Supabase');
+        // Only load from DB if context has default filters OR if we want to enforce profile filters
+        if (filters === DEFAULT_FILTERS || filters.issueArea === null) {
+          const prefs = await fetchUserPreferences(user.id);
+          if (prefs) {
+            const loadedFilters = {
+              issueArea: prefs.issueAreas?.[0] || null,
+              scope: prefs.preferredScope || null,
+              fundingMin: prefs.fundingMin || 0,
+              fundingMax: prefs.fundingMax || 500000,
+            };
+            setContextFilters(loadedFilters);
+            console.log('📥 [LOAD] Loaded filters from Supabase:', loadedFilters);
+          }
+        }
+      } else {
+        console.log('⊘ [LOAD] Profile preferences disabled - clearing profile-based filters');
+        // If checkbox is OFF, clear any profile-based filters
+        if (filters.issueArea || filters.scope) {
+          setContextFilters(DEFAULT_FILTERS);
+          console.log('🗑️ [LOAD] Cleared profile filters');
         }
       }
     }
 
     if (user) {
       loadPreferences();
+    }
+  }, [user, useProfileFilters]); // Re-run when checkbox changes
+
+  // Load user profile for writeup generation
+  useEffect(() => {
+    async function loadProfile() {
+      if (!user?.id) return;
+      const profile = await loadOrganizationProfile(user.id);
+      if (profile) {
+        setUserProfile(profile);
+      }
+    }
+
+    if (user) {
+      loadProfile();
     }
   }, [user]);
 
@@ -191,8 +229,57 @@ export default function Dashboard() {
 
     if (!hasSearched) {
       applyFilters(newFilters);
+    } else {
+      // When filters change after an NLP search, provide feedback
+      toast({
+        title: "Filters updated",
+        description: "Search results are now filtered by your criteria",
+      });
     }
   };
+
+  // Main NLP search handler
+  const handleSearch = useCallback(async (query: string, overrideUseProfile?: boolean) => {
+    if (!user?.id) return;
+
+    const shouldUseProfile = overrideUseProfile !== undefined ? overrideUseProfile : useProfileFilters;
+
+    setIsSearching(true);
+    setSearchError(null);
+
+    try {
+      console.log(`🔍 Searching with profile preferences: ${shouldUseProfile}`);
+      const results = await searchGrants(
+        query,
+        user.id,
+        {
+          issueArea: filters.issueArea,
+          scope: filters.scope,
+          fundingMin: filters.fundingMin,
+          fundingMax: filters.fundingMax,
+        },
+        shouldUseProfile  // Pass the useProfileFilters setting
+      );
+
+      setSearchResults(results, query);
+      toast({
+        title: `Found ${results.length} matching grants`,
+        description: shouldUseProfile
+          ? "Results scored with your organization profile"
+          : "Results scored based on search query only",
+      });
+    } catch (error) {
+      console.error('Search failed:', error);
+      setSearchError(error instanceof Error ? error.message : 'Search failed');
+      toast({
+        title: "Search failed",
+        description: "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSearching(false);
+    }
+  }, [user, filters, useProfileFilters, setSearchResults, toast]);
 
   // Reset clears session filters only - does NOT affect profile in Supabase
   const handleResetFilters = () => {
@@ -206,39 +293,6 @@ export default function Dashboard() {
     });
   };
 
-  const handleSearch = async (query: string) => {
-    setIsSearching(true);
-    setSearchError(null);
-
-    try {
-      // Only pass userId if user wants profile preferences to affect search
-      const userIdForSearch = useProfileFilters ? user?.id : undefined;
-      const results = await searchGrants(query, userIdForSearch);
-      setSearchResults(results, query);
-
-      if (results.length === 0) {
-        toast({
-          title: "No grants found",
-          description: "Try broadening your search criteria.",
-        });
-      } else {
-        toast({
-          title: `Found ${results.length} matching grants`,
-          description: `Top match: ${results[0].matchScore}% relevance${useProfileFilters ? ' (with profile preferences)' : ''}`,
-        });
-      }
-    } catch (error) {
-      console.error('Search failed:', error);
-      setSearchError('Search failed. The AI service may be rate-limited. Try using the manual filters below.');
-      toast({
-        title: "AI search unavailable",
-        description: "Use the manual filters instead.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSearching(false);
-    }
-  };
 
   const handleSaveGrant = async (grantId: string) => {
     if (!user?.id) return;
@@ -441,12 +495,49 @@ export default function Dashboard() {
             />
 
             {/* Profile Preference Toggle */}
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border">
+            <div className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${useProfileFilters ? 'bg-primary/5 border-primary/20' : 'bg-muted/50 border-border'
+              }`}>
               <input
                 type="checkbox"
                 id="useProfileFilters"
                 checked={useProfileFilters}
-                onChange={(e) => setUseProfileFilters(e.target.checked)}
+                onChange={async (e) => {
+                  const newValue = e.target.checked;
+                  console.log('🎯 [CHECKBOX] ===== CHECKBOX CLICKED =====');
+                  console.log('🎯 [CHECKBOX] Current value:', useProfileFilters);
+                  console.log('🎯 [CHECKBOX] New value:', newValue);
+                  console.log('🎯 [CHECKBOX] Current filters:', filters);
+                  console.log('🎯 [CHECKBOX] Has active search:', hasSearched);
+                  console.log('🎯 [CHECKBOX] Last query:', searchState.lastQuery);
+
+                  setContextUseProfileFilters(newValue);
+                  console.log('🎯 [CHECKBOX] Called setContextUseProfileFilters with:', newValue);
+                  console.log('🎯 [CHECKBOX] This should trigger filter reload in useEffect');
+
+                  // If there's an active search, automatically re-run it with new preference
+                  if (hasSearched && searchState.lastQuery) {
+                    console.log('🎯 [CHECKBOX] Re-searching with new preference...');
+                    toast({
+                      title: newValue ? "Re-searching with profile preferences" : "Re-searching without profile preferences",
+                      description: "Updating results...",
+                    });
+
+                    // Re-run the search with the new preference setting
+                    await handleSearch(searchState.lastQuery, newValue);
+                    console.log('🎯 [CHECKBOX] Re-search completed');
+                  } else {
+                    console.log('🎯 [CHECKBOX] No active search, filters will update via useEffect');
+                    const message = newValue
+                      ? "Profile preferences enabled - Healthcare filter will appear"
+                      : "Profile preferences disabled - Healthcare filter will be removed";
+                    toast({
+                      title: newValue ? "Profile preferences enabled" : "Profile preferences disabled",
+                      description: message,
+                    });
+                  }
+
+                  console.log('🎯 [CHECKBOX] ===== CHECKBOX HANDLER COMPLETE =====');
+                }}
                 className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary"
               />
               <label htmlFor="useProfileFilters" className="text-sm cursor-pointer">
@@ -542,6 +633,9 @@ export default function Dashboard() {
                         onSave={handleSaveGrant}
                         isSaved={isGrantSaved(grant.id)}
                         showMatchScore={true}
+                        userProfile={userProfile}
+                        searchQuery={searchState.lastQuery}
+                        appliedFilters={filters}
                       />
                     ))}
                 </div>
@@ -612,6 +706,7 @@ export default function Dashboard() {
                         onSave={handleSaveGrant}
                         isSaved={true}
                         showMatchScore={false}
+                        userProfile={userProfile}
                       />
                     )}
                     <div className="absolute top-2 right-2 flex items-center gap-2">

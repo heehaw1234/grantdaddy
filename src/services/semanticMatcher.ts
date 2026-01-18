@@ -1,16 +1,25 @@
 import { Grant } from '@/types/database';
 import Groq from 'groq-sdk';
 
-const API_KEY = import.meta.env.VITE_GROQ_API_KEY;
+// Multiple API keys for parallel processing
+const API_KEYS = [
+    import.meta.env.VITE_GROQ_API_KEY,
+    import.meta.env.VITE_GROQ_API_KEY_2,
+    import.meta.env.VITE_GROQ_API_KEY_3,
+].filter(Boolean);
 
-if (!API_KEY) {
-    throw new Error('VITE_GROQ_API_KEY is not set');
+if (API_KEYS.length === 0) {
+    throw new Error('At least one VITE_GROQ_API_KEY must be set');
 }
 
-const groq = new Groq({
-    apiKey: API_KEY,
+console.log(`🔑 Initialized with ${API_KEYS.length} Groq API keys for parallel processing`);
+
+// Create Groq clients for each API key
+const groqClients = API_KEYS.map(apiKey => new Groq({
+    apiKey,
     dangerouslyAllowBrowser: true
-});
+}));
+
 
 /**
  * Score result from LLM for a single grant
@@ -255,11 +264,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Score a batch of grants using Groq LLM with retry logic
+ * Score a batch of grants using a specific Groq client with retry logic
  */
 async function scoreGrantBatch(
     userQuery: string,
     grants: Grant[],
+    groqClient: Groq,
     userPrefs?: UserMatchPreferences,
     retryCount: number = 0
 ): Promise<GrantScore[]> {
@@ -267,7 +277,7 @@ async function scoreGrantBatch(
     const prompt = buildScoringPrompt(userQuery, grants, userPrefs);
 
     try {
-        const response = await groq.chat.completions.create({
+        const response = await groqClient.chat.completions.create({
             model: 'llama-3.1-8b-instant', // Using smaller model to reduce token usage
             messages: [
                 { role: 'user', content: prompt }
@@ -288,7 +298,7 @@ async function scoreGrantBatch(
             const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
             console.log(`⏳ Rate limited, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
             await sleep(delay);
-            return scoreGrantBatch(userQuery, grants, userPrefs, retryCount + 1);
+            return scoreGrantBatch(userQuery, grants, groqClient, userPrefs, retryCount + 1);
         }
 
         console.error('Groq API error for batch:', error);
@@ -305,6 +315,7 @@ async function scoreGrantBatch(
 
 /**
  * Main semantic scoring function - scores all grants against user query
+ * Uses parallel processing across multiple API keys for ~3x faster performance
  */
 export async function scoreGrantsSemantically(
     userQuery: string,
@@ -319,22 +330,28 @@ export async function scoreGrantsSemantically(
 
     console.log(`🔍 Semantic scoring: "${userQuery}" against ${grants.length} grants`);
 
-    // Batch grants for sequential processing (avoids rate limits)
+    // Batch grants for parallel processing
     const batches = batchGrants(grants, CONFIG.BATCH_SIZE);
     console.log(`📦 Split into ${batches.length} batches of up to ${CONFIG.BATCH_SIZE} grants`);
+    console.log(`⚡ Processing in parallel using ${groqClients.length} API keys`);
 
-    // Score batches sequentially with small delays to avoid rate limits
-    const allBatchResults: GrantScore[][] = [];
-    for (let i = 0; i < batches.length; i++) {
-        console.log(`  → Processing batch ${i + 1}/${batches.length}: ${batches[i].length} grants`);
-        const result = await scoreGrantBatch(userQuery, batches[i], userPrefs);
-        allBatchResults.push(result);
+    // Process batches in parallel using all available API keys
+    const batchPromises = batches.map((batch, index) => {
+        // Assign each batch to a different API key (round-robin)
+        const clientIndex = index % groqClients.length;
+        const client = groqClients[clientIndex];
 
-        // Longer delay between batches to avoid rate limits on free tier
-        if (i < batches.length - 1) {
-            await sleep(2000);
-        }
-    }
+        console.log(`  → Batch ${index + 1}/${batches.length} assigned to API key ${clientIndex + 1}`);
+
+        return scoreGrantBatch(userQuery, batch, client, userPrefs);
+    });
+
+    // Wait for all batches to complete
+    const startTime = Date.now();
+    const allBatchResults = await Promise.all(batchPromises);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`✅ All batches completed in ${elapsed}s`);
+
 
     // Flatten results and deduplicate (keep highest score per grant)
     const allScoresRaw = allBatchResults.flat();

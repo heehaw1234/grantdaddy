@@ -1,22 +1,29 @@
+import { useState } from 'react';
 import { Grant } from '@/types/database';
+import { GrantWithScore } from '@/services/grantMatcher';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Calendar, DollarSign, Building, ExternalLink, Bookmark, Sparkles } from 'lucide-react';
+import { Calendar, DollarSign, Building, ExternalLink, Bookmark, Sparkles, FileText } from 'lucide-react';
 import { format } from 'date-fns';
+import { GrantWriteupDialog } from './GrantWriteupDialog';
+import { WriteupContext } from '@/services/grantWriteupService';
+import { OrganizationProfile } from '@/services/userPreferencesService';
 
-interface GrantWithScore extends Grant {
-  matchScore?: number;
-  matchReasons?: string[];
-  whyMatches?: string[];
-  whyDoesNotMatch?: string[];
-}
 
 interface GrantCardProps {
   grant: GrantWithScore;
   onSave?: (grantId: string) => void;
   isSaved?: boolean;
   showMatchScore?: boolean;
+  userProfile?: OrganizationProfile;
+  searchQuery?: string;
+  appliedFilters?: {
+    issueArea?: string | null;
+    scope?: string | null;
+    fundingMin?: number;
+    fundingMax?: number;
+  };
 }
 
 /**
@@ -66,7 +73,8 @@ function getScoreLabel(score: number): string {
   return 'Possible Match';
 }
 
-export function GrantCard({ grant, onSave, isSaved = false, showMatchScore = true }: GrantCardProps) {
+export function GrantCard({ grant, onSave, isSaved = false, showMatchScore = true, userProfile, searchQuery, appliedFilters }: GrantCardProps) {
+  const [showWriteupDialog, setShowWriteupDialog] = useState(false);
   const formatFunding = () => {
     if (!grant.funding_min && !grant.funding_max) return 'Not specified';
     if (grant.funding_min && grant.funding_max) {
@@ -227,13 +235,39 @@ export function GrantCard({ grant, onSave, isSaved = false, showMatchScore = tru
           </div>
         )}
       </CardContent>
-      <CardFooter>
+      <CardFooter className="flex flex-col gap-2">
         {grant.source_url && (
           <Button variant="outline" className="w-full" asChild>
             <a href={grant.source_url} target="_blank" rel="noopener noreferrer">
               View Grant <ExternalLink size={16} className="ml-2" />
             </a>
           </Button>
+        )}
+
+        {/* Show writeup button for grants with 50%+ match score */}
+        {showMatchScore && grant.matchScore !== undefined && grant.matchScore >= 50 && (
+          <Button
+            variant="default"
+            className="w-full"
+            onClick={() => setShowWriteupDialog(true)}
+          >
+            <FileText size={16} className="mr-2" />
+            Find Out More Information
+          </Button>
+        )}
+
+        {/* Writeup Dialog */}
+        {showWriteupDialog && (
+          <GrantWriteupDialog
+            open={showWriteupDialog}
+            onOpenChange={setShowWriteupDialog}
+            context={{
+              grant,
+              userProfile,
+              searchQuery,
+              appliedFilters,
+            }}
+          />
         )}
       </CardFooter>
     </Card>

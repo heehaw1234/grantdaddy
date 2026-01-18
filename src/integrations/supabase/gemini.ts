@@ -1,18 +1,54 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+// Groq API keys with rotation support for rate limiting
+const API_KEYS = [
+  import.meta.env.VITE_GROQ_API_KEY,
+  import.meta.env.VITE_GROQ_API_KEY_2,
+  import.meta.env.VITE_GROQ_API_KEY_3,
+].filter(Boolean); // Remove undefined keys
 
-if (!API_KEY) {
-  throw new Error('VITE_GEMINI_API_KEY is not set');
+if (API_KEYS.length === 0) {
+  throw new Error('At least one VITE_GROQ_API_KEY must be set');
 }
 
-export const genAI = new GoogleGenerativeAI(API_KEY);
-export const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+let currentKeyIndex = 0;
 
-export async function generateText(prompt: string) {
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  return response.text();
+function getGroqClient(): Groq {
+  const apiKey = API_KEYS[currentKeyIndex];
+  return new Groq({
+    apiKey,
+    dangerouslyAllowBrowser: true
+  });
+}
+
+function rotateApiKey(): void {
+  currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
+  console.log(`🔄 Rotated to API key ${currentKeyIndex + 1}/${API_KEYS.length}`);
+}
+
+export async function generateText(prompt: string): Promise<string> {
+  const groq = getGroqClient();
+
+  try {
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+    });
+
+    return response.choices[0].message.content || '';
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isRateLimit = errorMessage.includes('429') || errorMessage.includes('rate');
+
+    if (isRateLimit && API_KEYS.length > 1) {
+      console.log('⚠️ Rate limited, trying next API key...');
+      rotateApiKey();
+      return generateText(prompt); // Retry with next key
+    }
+
+    throw error;
+  }
 }
 
 /**
@@ -102,9 +138,15 @@ User query: "${userQuery}"
 Respond with ONLY the JSON object, no markdown formatting or explanation.`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const groq = getGroqClient();
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    });
+
+    const text = response.choices[0].message.content || '{}';
 
     // Clean up response - remove markdown code blocks if present
     const cleanedText = text
@@ -128,7 +170,17 @@ Respond with ONLY the JSON object, no markdown formatting or explanation.`;
       originalQuery: userQuery,
       parseConfidence: parsed.parseConfidence || 0.5,
     };
-  } catch (error) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isRateLimit = errorMessage.includes('429') || errorMessage.includes('rate');
+
+    // Retry with next API key if rate limited
+    if (isRateLimit && API_KEYS.length > 1) {
+      console.log('⚠️ Rate limited during query parsing, trying next API key...');
+      rotateApiKey();
+      return parseGrantQuery(userQuery); // Retry with next key
+    }
+
     console.error('Failed to parse grant query:', error);
     // Return a fallback with just keywords extracted from the query
     return {
