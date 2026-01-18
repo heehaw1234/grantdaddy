@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,10 +7,18 @@ import { Search, Sparkles } from 'lucide-react';
 interface NLPSearchInputProps {
   onSearch: (query: string) => void;
   isLoading?: boolean;
+  defaultValue?: string;
 }
 
-export function NLPSearchInput({ onSearch, isLoading = false }: NLPSearchInputProps) {
-  const [query, setQuery] = useState('');
+export function NLPSearchInput({ onSearch, isLoading = false, defaultValue = '' }: NLPSearchInputProps) {
+  const [query, setQuery] = useState(defaultValue);
+
+  // Update query when defaultValue changes (for persistence)
+  useEffect(() => {
+    if (defaultValue && defaultValue !== query) {
+      setQuery(defaultValue);
+    }
+  }, [defaultValue]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

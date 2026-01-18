@@ -13,6 +13,8 @@ import {
 export interface GrantWithScore extends Grant {
     matchScore: number;
     matchReasons: string[];
+    whyMatches?: string[];
+    whyDoesNotMatch?: string[];
 }
 
 /**
@@ -199,6 +201,8 @@ export async function searchGrants(
                 ...grant,
                 matchScore: score.score,
                 matchReasons: score.reasons,
+                whyMatches: score.whyMatches,
+                whyDoesNotMatch: score.whyDoesNotMatch,
             };
         })
         .filter((g): g is GrantWithScore => g !== null);
@@ -327,6 +331,8 @@ export async function filterGrantsManually(
             ...grant,
             matchScore: Math.max(50, score), // Minimum 50% since they passed the DB filters
             matchReasons: reasons.length > 0 ? reasons : ['Matches your filters'],
+            whyMatches: reasons.length > 0 ? reasons : ['Matches your selected filters'],
+            whyDoesNotMatch: score < 100 ? ['Some filter criteria may not be fully met'] : [],
         };
     });
 }
@@ -352,7 +358,9 @@ export async function getAllGrants(): Promise<GrantWithScore[]> {
     return (data as Grant[] || []).map(grant => ({
         ...grant,
         matchScore: 50,
-        matchReasons: ['Active grant'],
+        matchReasons: ['Active grant - use NLP search for detailed matching'],
+        whyMatches: ['Grant is currently active and accepting applications'],
+        whyDoesNotMatch: ['No specific search criteria applied yet'],
     }));
 }
 

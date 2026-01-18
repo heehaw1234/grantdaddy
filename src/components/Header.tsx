@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { LogOut, User, LayoutDashboard } from 'lucide-react';
+import { LogOut, LayoutDashboard, Building2 } from 'lucide-react';
 
 export function Header() {
   const { user, signOut } = useAuth();
@@ -22,6 +22,12 @@ export function Header() {
                 <Link to="/dashboard">
                   <LayoutDashboard size={18} className="mr-2" />
                   Dashboard
+                </Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link to="/profile">
+                  <Building2 size={18} className="mr-2" />
+                  Profile
                 </Link>
               </Button>
               <Button variant="ghost" size="icon" onClick={signOut}>

@@ -8,6 +8,8 @@ import { format } from 'date-fns';
 interface GrantWithScore extends Grant {
   matchScore?: number;
   matchReasons?: string[];
+  whyMatches?: string[];
+  whyDoesNotMatch?: string[];
 }
 
 interface GrantCardProps {
@@ -119,18 +121,69 @@ export function GrantCard({ grant, onSave, isSaved = false, showMatchScore = tru
           <p className="text-sm text-muted-foreground line-clamp-3">{grant.description}</p>
         )}
 
-        {/* Match Reasons */}
-        {hasMatchScore && grant.matchReasons && grant.matchReasons.length > 0 && (
-          <div className={`text-xs p-2 rounded-md ${scoreColors?.bg} ${scoreColors?.border} border`}>
-            <p className={`font-medium ${scoreColors?.text} mb-1`}>Why this matches:</p>
-            <ul className="text-muted-foreground space-y-0.5">
-              {grant.matchReasons.slice(0, 3).map((reason, idx) => (
-                <li key={idx} className="flex items-start gap-1">
-                  <span className={scoreColors?.text}>•</span>
-                  {reason}
-                </li>
-              ))}
-            </ul>
+        {/* Match Reasons - Pros and Cons */}
+        {hasMatchScore && (grant.whyMatches?.length || grant.whyDoesNotMatch?.length || grant.matchReasons?.length) && (
+          <div className={`text-xs p-2 rounded-md ${scoreColors?.bg} ${scoreColors?.border} border space-y-2`}>
+            {/* Show "Why this matches" for scores >= 50, "Why this may not match" for < 50 */}
+            {grant.matchScore! >= 50 ? (
+              <>
+                {(grant.whyMatches?.length || 0) > 0 && (
+                  <div>
+                    <p className="font-medium text-emerald-600 dark:text-emerald-400 mb-1">✓ Why this matches:</p>
+                    <ul className="text-muted-foreground space-y-0.5">
+                      {grant.whyMatches!.slice(0, 3).map((reason, idx) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-emerald-500">•</span>
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(grant.whyDoesNotMatch?.length || 0) > 0 && (
+                  <div>
+                    <p className="font-medium text-amber-600 dark:text-amber-400 mb-1">⚠ Considerations:</p>
+                    <ul className="text-muted-foreground space-y-0.5">
+                      {grant.whyDoesNotMatch!.slice(0, 2).map((reason, idx) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-amber-500">•</span>
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {(grant.whyDoesNotMatch?.length || 0) > 0 && (
+                  <div>
+                    <p className="font-medium text-red-600 dark:text-red-400 mb-1">✗ Why this may not match:</p>
+                    <ul className="text-muted-foreground space-y-0.5">
+                      {grant.whyDoesNotMatch!.slice(0, 3).map((reason, idx) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-red-500">•</span>
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(grant.whyMatches?.length || 0) > 0 && (
+                  <div>
+                    <p className="font-medium text-emerald-600 dark:text-emerald-400 mb-1">✓ Possible fit:</p>
+                    <ul className="text-muted-foreground space-y-0.5">
+                      {grant.whyMatches!.slice(0, 2).map((reason, idx) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-emerald-500">•</span>
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 

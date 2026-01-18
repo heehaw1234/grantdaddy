@@ -14,6 +14,10 @@ export interface EmailAlertPreferences {
     preferred_scope: 'local' | 'national' | 'international' | null;
     funding_min: number;
     funding_max: number;
+    // New fields for enhanced alerts
+    deadline_reminder_days: number[];
+    notify_saved_updates: boolean;
+    notify_new_funders: boolean;
     last_sent_at?: string;
     created_at?: string;
     updated_at?: string;
@@ -30,6 +34,9 @@ export const DEFAULT_ALERT_PREFERENCES: Omit<EmailAlertPreferences, 'user_id' | 
     preferred_scope: null,
     funding_min: 0,
     funding_max: 100000,
+    deadline_reminder_days: [7],
+    notify_saved_updates: true,
+    notify_new_funders: false,
 };
 
 // Helper to access tables not yet in generated types

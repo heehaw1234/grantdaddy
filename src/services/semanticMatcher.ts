@@ -18,7 +18,9 @@ const groq = new Groq({
 export interface GrantScore {
     grantId: string;
     score: number;
-    reasons: string[];  // Multiple detailed reasons
+    reasons: string[];  // Legacy - combined reasons
+    whyMatches: string[];  // Positive reasons why it matches
+    whyDoesNotMatch: string[];  // Negative reasons / concerns
 }
 
 /**
@@ -119,7 +121,7 @@ Funding: $${g.funding_min || 0} - $${g.funding_max || 'No limit'}
         ? `\nUSER PROFILE: Interested in ${userPrefs.issueAreas?.join(', ') || 'various areas'}. Prefers ${userPrefs.preferredScope || 'any'} scope.`
         : '';
 
-    return `You are a helpful Singapore grant matching assistant. Score each grant's relevance to what the person is looking for.
+    return `You are a helpful Singapore grant matching assistant. Score each grant's relevance to what the person is looking for and explain both why it matches AND why it might not be ideal.
 
 What they're looking for: "${userQuery}"${userContext}
 
@@ -133,10 +135,11 @@ Scoring guide:
 - 30-49: Weak fit - only loosely connected
 - 0-29: Not relevant
 
-For each grant, provide reasons in this format (using "you" to address the person):
-- "Why the purpose matches: [explanation of how grant purpose aligns with your needs]"
-- "Why you may qualify: [eligibility assessment]"
-- "About the funding: [funding range and fit]"
+For each grant, provide:
+1. "whyMatches" - Array of reasons why this grant IS a good fit (positive aspects)
+2. "whyDoesNotMatch" - Array of reasons why this grant might NOT be ideal or concerns (negative aspects, limitations, potential issues)
+
+Be specific and address the user directly with "you/your".
 
 Also extract any filters mentioned (issue area, scope, funding range, funder, deadline preferences).
 
@@ -154,7 +157,8 @@ Return valid JSON only:
     {
       "id": "grant-uuid",
       "score": 85,
-      "reasons": ["Why the purpose matches: This grant directly supports your interest in youth volunteering", "Why you may qualify: Open to individuals and organizations", "About the funding: Up to $20,000 available"]
+      "whyMatches": ["This grant directly supports your interest in youth volunteering", "Funding range of $20,000 fits your budget", "Open to individuals and organizations"],
+      "whyDoesNotMatch": ["Deadline is only 2 weeks away", "Requires prior experience in the sector"]
     }
   ]
 }`;
@@ -186,7 +190,15 @@ function parseScoreResponse(response: string, grants: Grant[]): GrantScore[] {
             }
         }
 
-        return parsed.map((item: { id?: string; index?: number; score?: number; reason?: string; reasons?: string[] }) => {
+        return parsed.map((item: {
+            id?: string;
+            index?: number;
+            score?: number;
+            reason?: string;
+            reasons?: string[];
+            whyMatches?: string[];
+            whyDoesNotMatch?: string[];
+        }) => {
             // Handle both id-based and index-based responses
             let grantId = item.id;
             if (!grantId && item.index !== undefined) {
@@ -194,20 +206,38 @@ function parseScoreResponse(response: string, grants: Grant[]): GrantScore[] {
                 grantId = grant?.id;
             }
 
-            // Handle both single reason and reasons array
+            // Handle both single reason and reasons array (legacy support)
             let reasons: string[] = [];
             if (item.reasons && Array.isArray(item.reasons)) {
                 reasons = item.reasons;
             } else if (item.reason) {
                 reasons = [item.reason];
-            } else {
-                reasons = ['Match found'];
             }
+
+            // Extract whyMatches and whyDoesNotMatch
+            const whyMatches = item.whyMatches || [];
+            const whyDoesNotMatch = item.whyDoesNotMatch || [];
+
+            // If legacy format, try to split reasons into pros/cons
+            if (reasons.length > 0 && whyMatches.length === 0) {
+                reasons.forEach(r => {
+                    if (r.toLowerCase().includes('not') || r.toLowerCase().includes('concern') || r.toLowerCase().includes('limit')) {
+                        whyDoesNotMatch.push(r);
+                    } else {
+                        whyMatches.push(r);
+                    }
+                });
+            }
+
+            // Combine for legacy compatibility
+            const combinedReasons = [...whyMatches, ...whyDoesNotMatch];
 
             return {
                 grantId: grantId || '',
                 score: Math.min(100, Math.max(0, item.score || 0)),
-                reasons,
+                reasons: combinedReasons.length > 0 ? combinedReasons : ['Match analysis complete'],
+                whyMatches: whyMatches.length > 0 ? whyMatches : ['Potential match found'],
+                whyDoesNotMatch,
             };
         }).filter((s: GrantScore) => s.grantId); // Remove any without valid IDs
 
@@ -267,6 +297,8 @@ async function scoreGrantBatch(
             grantId: g.id,
             score: 50,
             reasons: ['Could not analyze - showing as potential match'],
+            whyMatches: ['Could not fully analyze - shown as potential match'],
+            whyDoesNotMatch: ['Analysis incomplete due to service error'],
         }));
     }
 }
@@ -328,6 +360,7 @@ export async function scoreGrantsSemantically(
                     ...score,
                     score: Math.min(100, score.score + CONFIG.PREFERENCE_BOOST),
                     reasons: [...score.reasons, '✨ Matches your preferences'],
+                    whyMatches: [...score.whyMatches, '✨ Matches your profile preferences'],
                 };
             }
             return score;

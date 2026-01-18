@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Bell, Mail, Send, Loader2, CheckCircle2 } from 'lucide-react';
+import { Bell, Mail, Send, Loader2, CheckCircle2, RefreshCw, Calendar } from 'lucide-react';
 import {
     loadAlertPreferences,
     saveAlertPreferences,
@@ -15,6 +15,10 @@ import {
     EmailAlertPreferences,
     DEFAULT_ALERT_PREFERENCES
 } from '@/services/emailAlertService';
+import {
+    loadOrganizationProfile,
+    syncAlertPreferencesFromProfile,
+} from '@/services/userPreferencesService';
 
 // Issue areas based on actual Singapore grant database
 const ISSUE_AREAS = [
@@ -33,6 +37,13 @@ const SCOPES = [
     { value: 'international', label: 'International' },
 ];
 
+const DEADLINE_REMINDER_OPTIONS = [
+    { value: 3, label: '3 days before' },
+    { value: 7, label: '7 days before' },
+    { value: 14, label: '14 days before' },
+    { value: 30, label: '30 days before' },
+];
+
 export function AlertPreferences() {
     const { user } = useAuth();
     const { toast } = useToast();
@@ -40,7 +51,9 @@ export function AlertPreferences() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [sendingTest, setSendingTest] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const [hasChanges, setHasChanges] = useState(false);
+    const [hasOrgProfile, setHasOrgProfile] = useState(false);
 
     const [preferences, setPreferences] = useState<Omit<EmailAlertPreferences, 'user_id' | 'email'>>({
         ...DEFAULT_ALERT_PREFERENCES,
@@ -50,8 +63,15 @@ export function AlertPreferences() {
     useEffect(() => {
         if (user) {
             loadPreferences();
+            checkOrgProfile();
         }
     }, [user]);
+
+    async function checkOrgProfile() {
+        if (!user) return;
+        const profile = await loadOrganizationProfile(user.id);
+        setHasOrgProfile(!!(profile?.issue_areas?.length || profile?.preferred_scope));
+    }
 
     async function loadPreferences() {
         if (!user) return;
@@ -68,6 +88,9 @@ export function AlertPreferences() {
                 preferred_scope: data.preferred_scope,
                 funding_min: data.funding_min,
                 funding_max: data.funding_max,
+                deadline_reminder_days: data.deadline_reminder_days || [7],
+                notify_saved_updates: data.notify_saved_updates ?? true,
+                notify_new_funders: data.notify_new_funders ?? false,
             });
         }
 
@@ -88,6 +111,14 @@ export function AlertPreferences() {
             ? current.filter(a => a !== area)
             : [...current, area];
         updatePreference('issue_areas', updated);
+    }
+
+    function toggleDeadlineReminder(days: number) {
+        const current = preferences.deadline_reminder_days || [];
+        const updated = current.includes(days)
+            ? current.filter(d => d !== days)
+            : [...current, days].sort((a, b) => b - a);
+        updatePreference('deadline_reminder_days', updated);
     }
 
     async function handleSave() {
@@ -118,6 +149,36 @@ export function AlertPreferences() {
         }
 
         setSaving(false);
+    }
+
+    async function handleSyncFromProfile() {
+        if (!user) return;
+
+        setSyncing(true);
+
+        const profile = await loadOrganizationProfile(user.id);
+        if (profile) {
+            setPreferences(prev => ({
+                ...prev,
+                issue_areas: profile.issue_areas || prev.issue_areas,
+                preferred_scope: profile.preferred_scope as any || prev.preferred_scope,
+                funding_min: profile.funding_min ?? prev.funding_min,
+                funding_max: profile.funding_max ?? prev.funding_max,
+            }));
+            setHasChanges(true);
+            toast({
+                title: 'Synced from profile',
+                description: 'Alert preferences updated from your organization profile.',
+            });
+        } else {
+            toast({
+                title: 'No profile found',
+                description: 'Complete your organization profile first.',
+                variant: 'destructive',
+            });
+        }
+
+        setSyncing(false);
     }
 
     async function handleSendTest() {
@@ -186,6 +247,80 @@ export function AlertPreferences() {
             {/* Only show other settings if enabled */}
             {preferences.is_enabled && (
                 <>
+                    {/* Deadline Reminders */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Calendar className="text-primary" size={20} />
+                                Deadline Reminders
+                            </CardTitle>
+                            <CardDescription>
+                                Get reminded before saved grant deadlines
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex flex-wrap gap-2">
+                                {DEADLINE_REMINDER_OPTIONS.map((option) => (
+                                    <Button
+                                        key={option.value}
+                                        variant={preferences.deadline_reminder_days?.includes(option.value) ? 'default' : 'outline'}
+                                        size="sm"
+                                        onClick={() => toggleDeadlineReminder(option.value)}
+                                        className="transition-all"
+                                    >
+                                        {preferences.deadline_reminder_days?.includes(option.value) && (
+                                            <CheckCircle2 size={14} className="mr-1" />
+                                        )}
+                                        {option.label}
+                                    </Button>
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Additional Notification Types */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Additional Notifications</CardTitle>
+                            <CardDescription>
+                                Choose what else you'd like to be notified about
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <Label htmlFor="saved-updates" className="font-medium">
+                                        Saved grant updates
+                                    </Label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Notify when grants you've saved are updated
+                                    </p>
+                                </div>
+                                <Switch
+                                    id="saved-updates"
+                                    checked={preferences.notify_saved_updates}
+                                    onCheckedChange={(checked) => updatePreference('notify_saved_updates', checked)}
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <Label htmlFor="new-funders" className="font-medium">
+                                        New funder announcements
+                                    </Label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Get notified when new funders join the platform
+                                    </p>
+                                </div>
+                                <Switch
+                                    id="new-funders"
+                                    checked={preferences.notify_new_funders}
+                                    onCheckedChange={(checked) => updatePreference('notify_new_funders', checked)}
+                                />
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     {/* Match Threshold */}
                     <Card>
                         <CardHeader>
@@ -248,10 +383,31 @@ export function AlertPreferences() {
                     {/* Issue Areas */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>Issue Areas</CardTitle>
-                            <CardDescription>
-                                Select the topics you're interested in (leave empty for all)
-                            </CardDescription>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Issue Areas</CardTitle>
+                                    <CardDescription>
+                                        Select the topics you're interested in (leave empty for all)
+                                    </CardDescription>
+                                </div>
+                                {hasOrgProfile && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleSyncFromProfile}
+                                        disabled={syncing}
+                                    >
+                                        {syncing ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <>
+                                                <RefreshCw size={14} className="mr-1" />
+                                                Sync from Profile
+                                            </>
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
                         </CardHeader>
                         <CardContent>
                             <div className="flex flex-wrap gap-2">
