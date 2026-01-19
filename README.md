@@ -6,9 +6,9 @@ Our team is dedicated to empowering non-profits and researchers by bridging the 
 **"Intelligent funding matching made simple: Organizations find their perfect grants with semantic search, receive instant 'fit' analysis, and generate tailored application drafts—all powered by state-of-the-art LLMs."**
 
 ## Try it out
-**Link to webapp:** [GrantMatch AI URL]
+**Link to webapp:** https://grantdaddy.vercel.app
 
-**Test User account:** user@example.com (password: test123)
+**Test User account:**
 *(Note: Please update with actual test credentials if available)*
 
 ## Inspiration
