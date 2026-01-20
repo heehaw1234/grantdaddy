@@ -2,14 +2,25 @@
 
 Our team is dedicated to empowering non-profits and researchers by bridging the gap between brilliant initiatives and the funding they need. By leveraging advanced AI, we aim to democratize access to grants and streamline the often complex application process.
 
+## Problem Statement
+> **How might non-profit organisations "pull" information about grants from OurSG Grants Portal that are relevant to them according to key criteria including issue area, scope of grant, KPIs, funding quantum, application due date, etc. so that they can strengthen their financial sustainability?**
+
+### Background
+Singapore has **2,300+ registered charities** and thousands more NPOs, with **60%+ having annual revenue under $500K**. These organizations are heavily reliant on grants for operational sustainability, yet most have only 1-2 staff members handling both fundraising and programs.
+
+The current grant discovery process is broken:
+- **Information overload** — OurSG Grants Portal lists 100+ grants requiring exhausting manual review
+- **Poor search tools** — Basic keyword filters miss semantically relevant opportunities
+- **No personalization** — Every NPO sees the same generic list regardless of their mission
+- **Fit uncertainty** — Hard to assess eligibility before investing hours in applications
+
+GrantMatch AI transforms this **manual pull** (searching, filtering, reading) into an **intelligent push** (AI finds, scores, and explains relevant opportunities automatically).
+
 ## AI-Powered Grant Discovery & Application Assistant
 **"Intelligent funding matching made simple: Organizations find their perfect grants with semantic search, receive instant 'fit' analysis, and generate tailored application drafts—all powered by state-of-the-art LLMs."**
 
 ## Try it out
-**Link to webapp:** https://grantdaddy.vercel.app
-
-**Test User account:**
-*(Note: Please update with actual test credentials if available)*
+**Link to webapp:** https://grantdaddy.vercel.app/
 
 ## Inspiration
 GrantMatch was inspired by the struggle many small organizations face: spending countless hours searching for funding only to apply for grants they are unlikely to win. 
